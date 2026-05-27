@@ -22,9 +22,12 @@ from pptx_control import PowerPointController, SlideState
 POLL_INTERVAL_S = 0.5
 NOTES_DEBOUNCE_S = 0.15  # collapse rapid slide changes into one push
 # Slide.Export blocks PowerPoint's UI thread (several seconds on real decks)
-# and starves keyboard input. Only export when the user has settled on a
-# slide for this long — rapid Next/Prev presses skip exports entirely.
+# and starves keyboard input. Only export when both: the slide has been
+# the same for IMAGE_STABILITY_S, AND no Next/Prev command has arrived
+# within IMAGE_IDLE_S. Both conditions together ensure we never compete
+# with active user navigation.
 IMAGE_STABILITY_S = 1.0
+IMAGE_IDLE_S = 1.5
 
 CMD_NEXT  = 0x01
 CMD_PREV  = 0x02
@@ -47,6 +50,7 @@ class App:
         self._last_image_deck: int = -1   # last deck index we exported & pushed
         self._seen_deck: int = -1         # last deck index the poll saw
         self._seen_deck_since: float = 0  # monotonic time we first saw it
+        self._last_command_time: float = 0  # monotonic time of last BLE cmd
         self._pending_push: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -69,6 +73,14 @@ class App:
                 self._on_command()
             except Exception:
                 log.debug("on_command callback raised", exc_info=True)
+        # Record the command time so the image-export decision can back off
+        # while the user is actively navigating.
+        self._last_command_time = time.monotonic()
+        # Start usually means a fresh show or a phone reconnect — force the
+        # thumbnail to be re-sent for whatever slide we land on, even if it
+        # matches the last one we pushed before.
+        if cmd == CMD_START:
+            self._last_image_deck = -1
         ppt = self.ppt
         loop = asyncio.get_running_loop()
         # All PowerPoint operations run on a worker thread so COM calls that
@@ -128,39 +140,46 @@ class App:
         state = await loop.run_in_executor(None, self.ppt.read_state)
         key = (state.current, state.total, state.notes, state.in_show)
         is_change = key != self._last_pushed
-        if not force and not is_change:
-            return
-        self._last_pushed = key
 
-        if state.total == 0:
-            self.ble.push_slide_info(0, 0)
-            self.ble.push_notes(0, NO_PPT_NOTES)
-            # Reset the image cache so the next live slide triggers an export.
-            self._last_image_deck = -1
-            return
-
-        self.ble.push_slide_info(state.current, state.total)
-        self.ble.push_notes(state.current, state.notes)
-
-        # Push a fresh slide thumbnail, but only after the deck position has
-        # been stable for a moment. Slide.Export blocks PowerPoint's UI
-        # thread; if we exported on every Next/Prev the keystrokes would
-        # queue up and PowerPoint would feel locked while the user navigates.
-        # Rapid presses skip exports entirely; we render the image once the
-        # speaker settles on a slide.
+        # Update stability tracking on every poll — the image-export
+        # decision below needs to know how long we've been on this deck
+        # slide, even when nothing else changed.
         now = time.monotonic()
         if state.deck_current != self._seen_deck:
             self._seen_deck = state.deck_current
             self._seen_deck_since = now
+
+        # Re-push counter/notes only when the state genuinely changed —
+        # there's no value in re-notifying clients with identical data.
+        if force or is_change:
+            self._last_pushed = key
+            if state.total == 0:
+                self.ble.push_slide_info(0, 0)
+                self.ble.push_notes(0, NO_PPT_NOTES)
+                # Reset the image cache so the next live slide triggers an export.
+                self._last_image_deck = -1
+                return
+            self.ble.push_slide_info(state.current, state.total)
+            self.ble.push_notes(state.current, state.notes)
+
+        # Push a fresh slide thumbnail, but only when:
+        #   - the deck position has been stable for a moment, AND
+        #   - no command has arrived recently
+        # Slide.Export blocks PowerPoint's UI thread, and the chunk stream
+        # ties up the BLE radio for ~1 s. Either alone is enough to make
+        # the slideshow feel locked while the user is pressing Next/Prev.
         deck_stable = (now - self._seen_deck_since) >= IMAGE_STABILITY_S
-        if (state.deck_current > 0
+        idle_enough = (now - self._last_command_time) >= IMAGE_IDLE_S
+        if (state.total > 0
+                and state.deck_current > 0
                 and state.deck_current != self._last_image_deck
-                and deck_stable):
+                and deck_stable
+                and idle_enough):
             data = await loop.run_in_executor(
                 None, self.ppt.read_slide_image, state.deck_current
             )
             if data:
-                self.ble.push_image(state.current, data)
+                await self.ble.push_image_async(state.current, data)
                 self._last_image_deck = state.deck_current
 
 

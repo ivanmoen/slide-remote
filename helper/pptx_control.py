@@ -142,51 +142,63 @@ class PowerPointController:
     _IMAGE_TARGET_BYTES = 12000  # leave headroom under the 24 KB chunk cap
 
     def read_slide_image(self, deck_index: int) -> bytes:
-        """Export the given deck slide as a JPEG and return its bytes,
-        recompressed to fit BLE's chunk budget.
+        """Capture the current slideshow window as a JPEG via Win32 BitBlt.
 
-        Returns empty bytes on any failure (no PowerPoint, slide out of
-        range, COM error). Aspect ratio is taken from the deck so 16:9 and
-        4:3 decks both render correctly.
+        Pixels are read directly from the screen — no PowerPoint COM call
+        is made, so this can never steal focus from the slideshow (which
+        Slide.Export was doing on some builds, leaving the slideshow
+        unable to receive keystrokes).
+
+        The deck_index argument is accepted for API parity with the older
+        export-by-index implementation, but the screen grab always
+        captures whatever the slideshow window is currently displaying.
+        Returns empty bytes if no slideshow window is running.
         """
-        if self._win32com is None or deck_index < 1:
+        if self._win32gui is None:
             return b""
-        app = self._get_app()
-        if app is None:
+        hwnd = self._find_slideshow_hwnd()
+        if not hwnd:
             return b""
         try:
-            if app.SlideShowWindows.Count > 0:
-                pres = app.SlideShowWindows(1).Presentation
-            elif app.Presentations.Count > 0:
-                pres = app.ActivePresentation
-            else:
-                return b""
-            if deck_index > int(pres.Slides.Count):
-                return b""
-            try:
-                sw = float(pres.PageSetup.SlideWidth)
-                sh = float(pres.PageSetup.SlideHeight)
-            except Exception:
-                sw, sh = 16.0, 9.0
-            target_w = self._IMAGE_TARGET_WIDTH
-            target_h = max(1, int(round(target_w * sh / sw)))
+            import io
+            import win32ui  # type: ignore
+            from PIL import Image  # type: ignore
 
-            import os
-            import tempfile
-            fd, tmp_path = tempfile.mkstemp(suffix=".jpg", prefix="slideremote_")
-            os.close(fd)
+            left, top, right, bottom = self._win32gui.GetWindowRect(hwnd)
+            width = right - left
+            height = bottom - top
+            if width <= 0 or height <= 0:
+                return b""
+
+            screen_dc_handle = self._win32gui.GetDC(0)  # 0 = entire screen
             try:
-                pres.Slides(deck_index).Export(tmp_path, "JPG", target_w, target_h)
-                with open(tmp_path, "rb") as f:
-                    raw = f.read()
+                screen_dc = win32ui.CreateDCFromHandle(screen_dc_handle)
+                mem_dc = screen_dc.CreateCompatibleDC()
+                bitmap = win32ui.CreateBitmap()
+                bitmap.CreateCompatibleBitmap(screen_dc, width, height)
+                mem_dc.SelectObject(bitmap)
+                # SRCCOPY = 0x00CC0020 — pure copy from source.
+                mem_dc.BitBlt((0, 0), (width, height), screen_dc, (left, top), 0x00CC0020)
+
+                raw = bitmap.GetBitmapBits(True)
+                img = Image.frombuffer("RGB", (width, height), raw, "raw", "BGRX", 0, 1)
+
+                self._win32gui.DeleteObject(bitmap.GetHandle())
+                mem_dc.DeleteDC()
+                screen_dc.DeleteDC()
             finally:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-            return self._recompress_jpeg(raw, self._IMAGE_TARGET_BYTES)
+                self._win32gui.ReleaseDC(0, screen_dc_handle)
+
+            target_w = self._IMAGE_TARGET_WIDTH
+            target_h = max(1, int(round(target_w * height / width)))
+            if width > target_w:
+                img = img.resize((target_w, target_h), Image.LANCZOS)
+
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=75, optimize=True)
+            return self._recompress_jpeg(buf.getvalue(), self._IMAGE_TARGET_BYTES)
         except Exception as e:
-            log.debug("slide image export failed for deck slide %d: %s", deck_index, e)
+            log.debug("slideshow window capture failed: %s", e)
             return b""
 
     @staticmethod
@@ -387,6 +399,38 @@ class PowerPointController:
             if h:
                 return int(h)
         return 0
+
+    def _force_foreground(self, hwnd: int) -> None:
+        """Bring `hwnd` to the foreground.
+
+        Windows blocks SetForegroundWindow from background processes unless
+        the calling thread is attached to the current foreground thread —
+        the classic AttachThreadInput trick is required to recover focus
+        after Slide.Export() steals it.
+        """
+        if not hwnd:
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+
+            current = user32.GetForegroundWindow()
+            if current == hwnd:
+                return  # already foreground; nothing to do
+            fg_thread = user32.GetWindowThreadProcessId(current, None) if current else 0
+            our_thread = kernel32.GetCurrentThreadId()
+            attached = False
+            if fg_thread and fg_thread != our_thread:
+                attached = bool(user32.AttachThreadInput(fg_thread, our_thread, True))
+            try:
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+            finally:
+                if attached:
+                    user32.AttachThreadInput(fg_thread, our_thread, False)
+        except Exception as e:
+            log.debug("force foreground failed: %s", e)
 
     def _post_key_to_show(self, show, vk: int) -> bool:
         """Post a keystroke directly to the slideshow window. Returns True

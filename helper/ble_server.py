@@ -191,12 +191,12 @@ class PPTBLEServer:
         log.info("pushed notes for slide %d (%d B in %d chunks)",
                  slide_index, len(data), total)
 
-    def push_image(self, slide_index: int, data: bytes) -> None:
-        """Push a JPEG of the current slide. Chunked the same way as notes —
-        the phone reassembles by (slide_index, chunk_idx, total_chunks)."""
-        if self._server is None:
-            return
-        if not data:
+    async def push_image_async(self, slide_index: int, data: bytes) -> None:
+        """Push a JPEG of the current slide, yielding between chunks so the
+        asyncio loop can keep servicing BLE commands while the image
+        streams out. The phone reassembles by (slide_index, chunk_idx,
+        total_chunks)."""
+        if self._server is None or not data:
             return
         if len(data) > MAX_IMAGE_BYTES:
             log.warning("slide-image too large: %d B > cap %d B; dropping",
@@ -219,5 +219,9 @@ class PPTBLEServer:
             except Exception as e:
                 log.debug("image notify failed (chunk %d/%d): %s", idx + 1, total, e)
                 return
+            # Yield to the event loop every few chunks so incoming BLE
+            # commands aren't held up behind the chunk stream.
+            if (idx & 0x07) == 0:
+                await asyncio.sleep(0)
         log.info("pushed image for slide %d (%d B in %d chunks)",
                  slide_index, len(data), total)
