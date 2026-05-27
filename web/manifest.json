@@ -1,0 +1,20 @@
+{
+  "name": "Slide Remote",
+  "short_name": "Slide Remote",
+  "description": "Bluetooth LE remote for PowerPoint with live speaker notes.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0c",
+  "theme_color": "#0a0a0c",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
