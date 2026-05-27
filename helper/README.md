@@ -3,7 +3,9 @@
 Python program that:
 - advertises a BLE GATT service named `PPT Remote`,
 - reads the active PowerPoint deck via COM (current slide, total, notes),
-- routes phone commands to PowerPoint (COM preferred, keystrokes as fallback).
+- captures the slideshow window via screen `BitBlt` for the phone thumbnail,
+- routes phone commands to PowerPoint (HWND PostMessage fast-path,
+  COM/View as fallback for edit mode).
 
 ## Requirements
 
@@ -109,13 +111,20 @@ byte (`01`) to the command characteristic to advance a slide.
   the user has permission to use Bluetooth. Some USB BT adapters lack the
   peripheral role — built-in Intel/Realtek radios on modern laptops work.
 - **COM fails with `pywintypes.com_error`**: PowerPoint isn't running, or
-  you've got the UWP build. The helper falls back to keystrokes — they only
-  reach PowerPoint when its window has focus.
+  you've got the UWP build. The HWND fast-path still works in slideshow mode
+  (it posts keystrokes directly to the slideshow window via class name lookup),
+  so Next/Prev keep functioning; only the state read (slide number, notes,
+  thumbnail) breaks.
 - **Notes are blank**: the slide's notes page may use a non-standard
   placeholder index. The reader scans all shapes if shape 2 is empty, so this
   is rare — confirm the notes pane in PowerPoint actually has text.
-- **Keystrokes don't work**: `pyautogui` sends to the foreground window. Click
-  into PowerPoint first.
+- **Slide thumbnail is blank**: thumbnails are only captured while the
+  slideshow is running (we `BitBlt` from the slideshow window). In edit mode
+  the helper sends counter and notes but no image.
+- **Slide doesn't advance** despite the log showing the keystroke was posted:
+  click on the slideshow window to refocus it. Modern Windows sometimes
+  unfocuses fullscreen windows when another app takes focus; both the
+  laptop keyboard and our PostMessage are affected.
 
 ## Configuration
 
