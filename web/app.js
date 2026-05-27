@@ -49,6 +49,10 @@ const state = {
   hasSlides: false,
   timerStart: null,
   timerHandle: null,
+  // Set when the user explicitly presses End. While true, slide-info
+  // notifications won't auto-restart the timer — only an explicit Start
+  // press does. Cleared on Start or on a fresh connect.
+  presentationStopped: false,
 };
 
 // ---- UI helpers --------------------------------------------------------
@@ -274,7 +278,9 @@ function onSlideInfo(ev) {
   state.totalSlides = total;
   if (current > 0 && total > 0) {
     setMode('Live', true);
-    startTimer();
+    // Respect an explicit End — don't auto-restart the timer while the
+    // user has the presentation stopped.
+    if (!state.presentationStopped) startTimer();
   } else {
     setMode('No deck open', false);
   }
@@ -419,12 +425,35 @@ els.connect.addEventListener('click', () => {
   else connect();
 });
 
-els.next.addEventListener('click',  () => sendCommand(CMD.NEXT));
-els.prev.addEventListener('click',  () => sendCommand(CMD.PREV));
+// Wrapper actions so click handlers and keyboard shortcuts both run the
+// same UI-side bookkeeping (e.g. clear the stale thumb, reset the timer)
+// regardless of which input fired them.
+function actNext() {
+  clearSlideThumb();
+  sendCommand(CMD.NEXT);
+}
+function actPrev() {
+  clearSlideThumb();
+  sendCommand(CMD.PREV);
+}
+function actStart() {
+  state.presentationStopped = false;
+  resetTimer();
+  startTimer();
+  sendCommand(CMD.START);
+}
+function actEnd() {
+  state.presentationStopped = true;
+  resetTimer();
+  sendCommand(CMD.END);
+}
+
+els.next.addEventListener('click',  actNext);
+els.prev.addEventListener('click',  actPrev);
 els.black.addEventListener('click', () => sendCommand(CMD.BLACK));
 els.white.addEventListener('click', () => sendCommand(CMD.WHITE));
-els.start.addEventListener('click', () => sendCommand(CMD.START));
-els.end.addEventListener('click',   () => sendCommand(CMD.END));
+els.start.addEventListener('click', actStart);
+els.end.addEventListener('click',   actEnd);
 
 // Keyboard shortcuts when a hardware keyboard is attached (e.g. desktop testing).
 document.addEventListener('keydown', (e) => {
@@ -432,15 +461,15 @@ document.addEventListener('keydown', (e) => {
   if (e.repeat) return;
   switch (e.key) {
     case 'ArrowRight': case 'PageDown': case ' ':
-      sendCommand(CMD.NEXT); e.preventDefault(); break;
+      actNext(); e.preventDefault(); break;
     case 'ArrowLeft': case 'PageUp':
-      sendCommand(CMD.PREV); e.preventDefault(); break;
+      actPrev(); e.preventDefault(); break;
     case 'b': case 'B':
       sendCommand(CMD.BLACK); e.preventDefault(); break;
     case 'w': case 'W':
       sendCommand(CMD.WHITE); e.preventDefault(); break;
     case 'Escape':
-      sendCommand(CMD.END); e.preventDefault(); break;
+      actEnd(); e.preventDefault(); break;
   }
 });
 
