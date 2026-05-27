@@ -1,17 +1,30 @@
-"""Entry point: start the BLE server and poll PowerPoint."""
+"""Entry point: start the BLE server and poll PowerPoint.
+
+Two modes:
+  - Tray (default): minimal UI in the system tray, no console window.
+  - Console (`--console`): logs to stdout, Ctrl+C to stop. Convenient for
+    development.
+"""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import signal
 import sys
+import time
+from typing import Callable, Optional
 
 from ble_server import PPTBLEServer
 from pptx_control import PowerPointController, SlideState
 
 POLL_INTERVAL_S = 0.5
 NOTES_DEBOUNCE_S = 0.15  # collapse rapid slide changes into one push
+# Slide.Export blocks PowerPoint's UI thread (several seconds on real decks)
+# and starves keyboard input. Only export when the user has settled on a
+# slide for this long — rapid Next/Prev presses skip exports entirely.
+IMAGE_STABILITY_S = 1.0
 
 CMD_NEXT  = 0x01
 CMD_PREV  = 0x02
@@ -26,10 +39,14 @@ log = logging.getLogger("ppt-remote")
 
 
 class App:
-    def __init__(self) -> None:
+    def __init__(self, on_command: Optional[Callable[[], None]] = None) -> None:
         self.ppt = PowerPointController()
         self.ble = PPTBLEServer(command_handler=self._handle_command)
+        self._on_command = on_command
         self._last_pushed: tuple[int, int, str, bool] | None = None
+        self._last_image_deck: int = -1   # last deck index we exported & pushed
+        self._seen_deck: int = -1         # last deck index the poll saw
+        self._seen_deck_since: float = 0  # monotonic time we first saw it
         self._pending_push: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -46,23 +63,33 @@ class App:
     # ---- command dispatch ---------------------------------------------
 
     async def _handle_command(self, cmd: int) -> None:
+        # Surface "we just heard from a client" to any subscriber (e.g. the tray).
+        if self._on_command is not None:
+            try:
+                self._on_command()
+            except Exception:
+                log.debug("on_command callback raised", exc_info=True)
         ppt = self.ppt
-        ok = False
-        if cmd == CMD_NEXT:
-            ok = ppt.next_slide()
-        elif cmd == CMD_PREV:
-            ok = ppt.prev_slide()
-        elif cmd == CMD_BLACK:
-            ok = ppt.black_screen()
-        elif cmd == CMD_WHITE:
-            ok = ppt.white_screen()
-        elif cmd == CMD_START:
-            ok = ppt.start_show()
-        elif cmd == CMD_END:
-            ok = ppt.end_show()
-        else:
+        loop = asyncio.get_running_loop()
+        # All PowerPoint operations run on a worker thread so COM calls that
+        # block during video playback don't freeze the asyncio loop (and
+        # therefore the BLE handler).
+        action = {
+            CMD_NEXT:  ppt.next_slide,
+            CMD_PREV:  ppt.prev_slide,
+            CMD_BLACK: ppt.black_screen,
+            CMD_WHITE: ppt.white_screen,
+            CMD_START: ppt.start_show,
+            CMD_END:   ppt.end_show,
+        }.get(cmd)
+        if action is None:
             log.warning("unknown command 0x%02x", cmd)
             return
+        try:
+            ok = await loop.run_in_executor(None, action)
+        except Exception:
+            log.exception("command 0x%02x raised", cmd)
+            ok = False
         log.debug("command 0x%02x dispatched ok=%s", cmd, ok)
         # Push state promptly so the phone reflects the result without waiting
         # for the next poll tick. The debounce keeps rapid clicks cheap.
@@ -75,17 +102,17 @@ class App:
 
     async def _debounced_push(self) -> None:
         await asyncio.sleep(NOTES_DEBOUNCE_S)
-        self._publish_current()
+        await self._publish_current_async()
 
     # ---- polling -------------------------------------------------------
 
     async def _poll_loop(self) -> None:
         # Initial push (even if PowerPoint isn't open yet) so a connecting
         # client gets something immediately.
-        self._publish_current(force=True)
+        await self._publish_current_async(force=True)
         while not self._stop.is_set():
             try:
-                self._publish_current()
+                await self._publish_current_async()
             except Exception as e:
                 log.exception("poll error: %s", e)
             try:
@@ -93,23 +120,51 @@ class App:
             except asyncio.TimeoutError:
                 pass
 
-    def _publish_current(self, force: bool = False) -> None:
-        state = self.ppt.read_state()
+    async def _publish_current_async(self, force: bool = False) -> None:
+        """Read state from PowerPoint on a worker thread (the COM call can
+        block for many seconds during video playback), then publish on the
+        asyncio loop where the BLE characteristics live."""
+        loop = asyncio.get_running_loop()
+        state = await loop.run_in_executor(None, self.ppt.read_state)
         key = (state.current, state.total, state.notes, state.in_show)
-        if not force and key == self._last_pushed:
+        is_change = key != self._last_pushed
+        if not force and not is_change:
             return
         self._last_pushed = key
 
         if state.total == 0:
             self.ble.push_slide_info(0, 0)
             self.ble.push_notes(0, NO_PPT_NOTES)
+            # Reset the image cache so the next live slide triggers an export.
+            self._last_image_deck = -1
             return
 
         self.ble.push_slide_info(state.current, state.total)
         self.ble.push_notes(state.current, state.notes)
 
+        # Push a fresh slide thumbnail, but only after the deck position has
+        # been stable for a moment. Slide.Export blocks PowerPoint's UI
+        # thread; if we exported on every Next/Prev the keystrokes would
+        # queue up and PowerPoint would feel locked while the user navigates.
+        # Rapid presses skip exports entirely; we render the image once the
+        # speaker settles on a slide.
+        now = time.monotonic()
+        if state.deck_current != self._seen_deck:
+            self._seen_deck = state.deck_current
+            self._seen_deck_since = now
+        deck_stable = (now - self._seen_deck_since) >= IMAGE_STABILITY_S
+        if (state.deck_current > 0
+                and state.deck_current != self._last_image_deck
+                and deck_stable):
+            data = await loop.run_in_executor(
+                None, self.ppt.read_slide_image, state.deck_current
+            )
+            if data:
+                self.ble.push_image(state.current, data)
+                self._last_image_deck = state.deck_current
 
-def _configure_logging() -> None:
+
+def _configure_console_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -117,8 +172,10 @@ def _configure_logging() -> None:
     )
 
 
-async def _amain() -> int:
-    _configure_logging()
+# ---- console mode (current behaviour) ---------------------------------
+
+async def _amain_console() -> int:
+    _configure_console_logging()
     app = App()
 
     loop = asyncio.get_running_loop()
@@ -142,11 +199,42 @@ async def _amain() -> int:
     return 0
 
 
-def main() -> None:
+def _run_console() -> int:
     try:
-        sys.exit(asyncio.run(_amain()))
+        return asyncio.run(_amain_console())
     except KeyboardInterrupt:
-        sys.exit(0)
+        return 0
+
+
+# ---- tray mode --------------------------------------------------------
+
+def _run_tray() -> int:
+    # Import lazily so console mode doesn't pay the pystray/Pillow cost.
+    from tray import run_tray
+
+    def make_app(on_command: Callable[[], None]) -> App:
+        return App(on_command=on_command)
+
+    return run_tray(make_app)
+
+
+# ---- CLI --------------------------------------------------------------
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(prog="SlideRemoteHelper", add_help=True)
+    p.add_argument(
+        "--console",
+        action="store_true",
+        help="Run in console mode (visible window, logs to stdout, Ctrl+C to stop). "
+             "Default is tray mode.",
+    )
+    return p.parse_args(argv)
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    args = _parse_args(list(sys.argv[1:] if argv is None else argv))
+    code = _run_console() if args.console else _run_tray()
+    sys.exit(code)
 
 
 if __name__ == "__main__":

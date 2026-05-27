@@ -39,16 +39,14 @@ here and adjust the v1 cut.
 
 ## P1 — Polish that will be requested fast
 
-### Tray icon / friendlier launcher (S, was M)
-The packaging half is done — `python build.py` produces
-`SlideRemoteHelper.exe` (see [helper/README.md](../helper/README.md#build-a-standalone-exe)).
-What's left:
-- Replace the console window with a Windows tray icon (e.g. `pystray`)
-  showing connection state and Start/Stop/Logs menu items.
-- Optional: auto-start on login via a Run-key entry.
-- Optional: code-signing certificate to silence SmartScreen on first run.
-**Why:** the .exe removes the Python install step, but a console window is
-still presenter-hostile.
+### Tray icon / friendlier launcher (DONE)
+Shipped. `python main.py` (and the .exe build) now launches into a Windows
+tray icon via `pystray`. Menu has Status / Reconnect BLE / Open log file /
+Start at login / Quit. Icon turns violet for ~30 s after each command from
+the phone. Logs go to `%LOCALAPPDATA%\SlideRemote\helper.log` with rotation.
+`python main.py --console` keeps the visible-stdout dev workflow.
+Still optional:
+- Code-signing certificate to silence SmartScreen on first run.
 
 ### macOS PowerPoint driver (M)
 Replace the COM branch with an AppleScript driver using `osascript` or
@@ -56,11 +54,10 @@ Replace the COM branch with an AppleScript driver using `osascript` or
 PowerPoint adapter is missing. Notes are accessible via
 `tell application "Microsoft PowerPoint" to get notes text of slide N`.
 
-### PWA install + offline app shell (S)
-Add `manifest.json`, an icon set, and a tiny service worker that caches
-`index.html` / `app.js` / `style.css`. Lets the phone open the remote even
-without cell signal in a basement conference room. The BLE peer is local
-so the rest still works.
+### PWA install + offline app shell (DONE)
+Shipped. `web/manifest.json`, `web/icon.svg`, and `web/sw.js` precache the
+shell on install so the page works in airplane mode after the first visit.
+"Add to Home Screen" gives a launchable, fullscreen icon.
 
 ### Settings panel (S)
 Surface the values that are hard-coded in [`ble_server.py`](../helper/ble_server.py)

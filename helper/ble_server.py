@@ -24,6 +24,7 @@ SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0"
 CHAR_COMMAND = "12345678-1234-5678-1234-56789abcdef1"
 CHAR_NOTES   = "12345678-1234-5678-1234-56789abcdef2"
 CHAR_SLIDE   = "12345678-1234-5678-1234-56789abcdef3"
+CHAR_IMAGE   = "12345678-1234-5678-1234-56789abcdef4"
 
 ADV_NAME = "PPT Remote"
 
@@ -34,6 +35,11 @@ ADV_NAME = "PPT Remote"
 DEFAULT_NOTES_CHUNK_BYTES = 100
 NOTES_HEADER_BYTES = 3
 MAX_NOTES_BYTES = 4096  # spec cap
+
+# Slide-image cap: chunk_idx is a single byte, so we can fit at most
+# 256 * (chunk_body) bytes. With body ~= 97 that's ~24 KB. Set the
+# practical cap a bit below so a too-large image is dropped cleanly.
+MAX_IMAGE_BYTES = 24000
 
 
 CommandHandler = Callable[[int], Awaitable[None]]
@@ -108,6 +114,13 @@ class PPTBLEServer:
             bytearray(b"\x00\x00"),
             GATTAttributePermissions.readable,
         )
+        await self._server.add_new_characteristic(
+            SERVICE_UUID,
+            CHAR_IMAGE,
+            GATTCharacteristicProperties.read | GATTCharacteristicProperties.notify,
+            bytearray(b""),
+            GATTAttributePermissions.readable,
+        )
 
         await self._server.start()
         log.info("BLE advertising as %r — service %s", ADV_NAME, SERVICE_UUID)
@@ -176,4 +189,35 @@ class PPTBLEServer:
                 log.debug("notes notify failed (chunk %d/%d): %s", idx + 1, total, e)
                 return
         log.info("pushed notes for slide %d (%d B in %d chunks)",
+                 slide_index, len(data), total)
+
+    def push_image(self, slide_index: int, data: bytes) -> None:
+        """Push a JPEG of the current slide. Chunked the same way as notes —
+        the phone reassembles by (slide_index, chunk_idx, total_chunks)."""
+        if self._server is None:
+            return
+        if not data:
+            return
+        if len(data) > MAX_IMAGE_BYTES:
+            log.warning("slide-image too large: %d B > cap %d B; dropping",
+                        len(data), MAX_IMAGE_BYTES)
+            return
+        body_size = max(1, self._chunk_body)
+        chunks = [data[i:i + body_size] for i in range(0, len(data), body_size)]
+        total = min(255, len(chunks))
+        slide_byte = max(0, min(255, slide_index))
+
+        char = self._server.get_characteristic(CHAR_IMAGE)
+        if char is None:
+            return
+
+        for idx, body in enumerate(chunks[:total]):
+            header = bytes([slide_byte, idx, total])
+            char.value = bytearray(header + body)
+            try:
+                self._server.update_value(SERVICE_UUID, CHAR_IMAGE)
+            except Exception as e:
+                log.debug("image notify failed (chunk %d/%d): %s", idx + 1, total, e)
+                return
+        log.info("pushed image for slide %d (%d B in %d chunks)",
                  slide_index, len(data), total)

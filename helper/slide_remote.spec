@@ -27,6 +27,18 @@ for pkg in ("bless", "bleak", "winrt"):
 hiddenimports += collect_submodules("win32com")
 hiddenimports += ["pythoncom", "pywintypes", "win32com.client"]
 
+# Tray UI: pystray picks its Windows backend dynamically; Pillow has C-extension
+# image plugins that PyInstaller's analyzer can miss.
+for pkg in ("pystray", "PIL"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        hiddenimports += h
+    except Exception:
+        pass
+hiddenimports += ["pystray._win32"]
+
 
 a = Analysis(
     ["main.py"],
@@ -53,7 +65,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,                # UPX compression triggers more AV false positives
-    console=True,             # keep stdout visible so users can see logs / Ctrl+C
+    console=False,            # tray-only build; logs go to %LOCALAPPDATA%\SlideRemote\helper.log
+                              # (run with --console for a visible dev window)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

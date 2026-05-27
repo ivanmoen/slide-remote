@@ -1,3 +1,10 @@
-bless>=0.2.6
+bless>=0.2.6,<0.3
+# bless transitively imports pysetupdi, which never shipped to PyPI.
+pysetupdi @ git+https://github.com/gwangyi/pysetupdi.git ; sys_platform == "win32"
+# bless 0.2.6 broke against the newer bleak module layout; pin the last
+# compatible series.
+bleak>=0.20,<0.22
 pyautogui>=0.9.54
 pywin32>=306; sys_platform == "win32"
+pystray>=0.19.5
+Pillow>=10.0.0

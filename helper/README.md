@@ -23,11 +23,33 @@ pip install -r requirements.txt
 
 ## Run
 
+The helper has two modes:
+
+### Tray mode (default)
+
 ```powershell
 python main.py
 ```
 
-You should see:
+A monitor-icon appears in the Windows system tray. Right-click it for:
+- **Status** — current state (advertising / active / stopped).
+- **Reconnect BLE** — stop and restart the BLE peripheral. Useful if a phone
+  gets stuck.
+- **Open log file** — opens `%LOCALAPPDATA%\SlideRemote\helper.log`.
+- **Start at login** — toggles a `HKCU\…\Run` entry (only visible when running
+  as the packaged `.exe`).
+- **Quit** — stop the helper.
+
+The icon turns violet for ~30 s after each command from the phone so you can
+see at a glance that the link is working.
+
+### Console mode (for development)
+
+```powershell
+python main.py --console
+```
+
+Logs stream to stdout as before; `Ctrl+C` to stop. You should see:
 
 ```
 12:00:00 INFO    ppt-remote: BLE advertising as 'PPT Remote' — service 12345678-...
@@ -49,7 +71,9 @@ python build.py
 
 The resulting binary lands at `helper/dist/SlideRemoteHelper.exe`
 (~35–55 MB). Copy it anywhere — it has no external dependencies. Double-click
-to start; logs go to a console window. Close the window or `Ctrl+C` to stop.
+to start; the helper runs silently in the system tray (no console window).
+Logs go to `%LOCALAPPDATA%\SlideRemote\helper.log`, openable from the tray
+menu. Quit via the tray menu.
 
 ### Notes on the build
 
@@ -60,9 +84,10 @@ to start; logs go to a console window. Close the window or `Ctrl+C` to stop.
   - `collect_submodules('win32com')` so PowerPoint COM dispatch resolves.
 - UPX compression is disabled deliberately — it makes AV false-positives
   much more likely on a presenter laptop you don't control.
-- The build is **console-mode** so logs are visible. If you want a tray-icon
-  build instead, that's tracked in [BACKLOG.md](../docs/BACKLOG.md) as a
-  separate item.
+- The build is **tray-mode** (`console=False`). Stdout goes nowhere — all
+  output is written to the rotating log file at
+  `%LOCALAPPDATA%\SlideRemote\helper.log`. For development, run
+  `python main.py --console` from source instead.
 
 ### Antivirus false positives
 
