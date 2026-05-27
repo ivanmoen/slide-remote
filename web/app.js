@@ -418,6 +418,23 @@ function clearSlideThumb() {
   state.renderedImageSlide = -1;
 }
 
+function clearNotes() {
+  // Drop the old notes immediately on Next/Prev so a fast press doesn't
+  // leave the previous slide's text on screen while the new notes are in
+  // flight. A placeholder fills the gap until the new notes arrive (or
+  // confirms there are no notes for this slide).
+  state.renderedSlide = -1;
+  state.notesBuf.clear();
+  els.notes.classList.remove('swap');
+  els.notes.innerHTML = '';
+  const p = document.createElement('p');
+  p.className = 'empty';
+  p.textContent = 'Loading next slide…';
+  els.notes.appendChild(p);
+  els.notes.scrollTop = 0;
+  els.notesSlideTag.classList.add('hidden');
+}
+
 // ---- Wire up UI --------------------------------------------------------
 
 els.connect.addEventListener('click', () => {
@@ -430,10 +447,12 @@ els.connect.addEventListener('click', () => {
 // regardless of which input fired them.
 function actNext() {
   clearSlideThumb();
+  clearNotes();
   sendCommand(CMD.NEXT);
 }
 function actPrev() {
   clearSlideThumb();
+  clearNotes();
   sendCommand(CMD.PREV);
 }
 function actStart() {

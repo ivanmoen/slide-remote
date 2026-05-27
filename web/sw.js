@@ -1,7 +1,7 @@
 // Slide Remote — offline service worker.
 // Pre-caches the app shell so the page works with zero network after first load.
 
-const CACHE = 'slide-remote-v4';
+const CACHE = 'slide-remote-v5';
 const SHELL = [
   './',
   './index.html',
