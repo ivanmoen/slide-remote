@@ -36,6 +36,42 @@ You should see:
 Now open PowerPoint with a deck. The helper polls every 500 ms and pushes
 notifications whenever the active slide changes.
 
+## Build a standalone `.exe`
+
+For a presenter machine that doesn't have Python set up, package the helper
+into a single Windows executable with [PyInstaller](https://pyinstaller.org/):
+
+```powershell
+# in the helper/ venv
+pip install -r requirements-dev.txt
+python build.py
+```
+
+The resulting binary lands at `helper/dist/SlideRemoteHelper.exe`
+(~35–55 MB). Copy it anywhere — it has no external dependencies. Double-click
+to start; logs go to a console window. Close the window or `Ctrl+C` to stop.
+
+### Notes on the build
+
+- `slide_remote.spec` is checked in; edit it (not the CLI flags) if you need
+  to tweak the build. Two hand-tuned bits live there:
+  - `collect_all('bless' / 'bleak' / 'winrt')` so PyInstaller picks up the
+    BLE library's dynamically-loaded WinRT modules.
+  - `collect_submodules('win32com')` so PowerPoint COM dispatch resolves.
+- UPX compression is disabled deliberately — it makes AV false-positives
+  much more likely on a presenter laptop you don't control.
+- The build is **console-mode** so logs are visible. If you want a tray-icon
+  build instead, that's tracked in [BACKLOG.md](../docs/BACKLOG.md) as a
+  separate item.
+
+### Antivirus false positives
+
+PyInstaller binaries occasionally trip Windows Defender SmartScreen or
+third-party AV on first run. If that happens:
+- Click "More info" → "Run anyway" on the SmartScreen dialog.
+- For corporate machines, code-signing the .exe with a certificate is the
+  proper fix.
+
 ## Verifying without the phone
 
 Install **nRF Connect** on an Android device. Scan for `PPT Remote`, connect,

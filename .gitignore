@@ -7,6 +7,11 @@ venv/
 env/
 .pytest_cache/
 
+# PyInstaller build artifacts
+build/
+dist/
+*.manifest
+
 # OS
 .DS_Store
 Thumbs.db

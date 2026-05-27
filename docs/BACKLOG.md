@@ -39,11 +39,16 @@ here and adjust the v1 cut.
 
 ## P1 — Polish that will be requested fast
 
-### Tray icon / packaged helper (M)
-A Python script in a terminal is not a serious deliverable for a presenter
-walking into a conference room. Package with PyInstaller or briefcase,
-ship a tray icon with Start/Stop/Logs. Auto-start optional.
-**Why:** removes the single biggest "I'll set this up later" friction.
+### Tray icon / friendlier launcher (S, was M)
+The packaging half is done — `python build.py` produces
+`SlideRemoteHelper.exe` (see [helper/README.md](../helper/README.md#build-a-standalone-exe)).
+What's left:
+- Replace the console window with a Windows tray icon (e.g. `pystray`)
+  showing connection state and Start/Stop/Logs menu items.
+- Optional: auto-start on login via a Run-key entry.
+- Optional: code-signing certificate to silence SmartScreen on first run.
+**Why:** the .exe removes the Python install step, but a console window is
+still presenter-hostile.
 
 ### macOS PowerPoint driver (M)
 Replace the COM branch with an AppleScript driver using `osascript` or
