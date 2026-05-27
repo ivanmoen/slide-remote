@@ -5,6 +5,7 @@ const SERVICE_UUID = '12345678-1234-5678-1234-56789abcdef0';
 const CHAR_COMMAND = '12345678-1234-5678-1234-56789abcdef1';
 const CHAR_NOTES   = '12345678-1234-5678-1234-56789abcdef2';
 const CHAR_SLIDE   = '12345678-1234-5678-1234-56789abcdef3';
+const CHAR_IMAGE   = '12345678-1234-5678-1234-56789abcdef4';
 
 const CMD = { NEXT: 0x01, PREV: 0x02, BLACK: 0x03, WHITE: 0x04, START: 0x05, END: 0x06 };
 
@@ -20,6 +21,8 @@ const els = {
   progressBar:  document.getElementById('progressBar'),
   notes:        document.getElementById('notes'),
   notesSlideTag:document.getElementById('notesSlideTag'),
+  slideThumb:   document.getElementById('slideThumb'),
+  slideThumbImg:document.getElementById('slideThumbImg'),
   prev:         document.getElementById('prevBtn'),
   next:         document.getElementById('nextBtn'),
   black:        document.getElementById('blackBtn'),
@@ -34,9 +37,13 @@ const state = {
   commandChar: null,
   notesChar: null,
   slideChar: null,
+  imageChar: null,
   connecting: false,
   notesBuf: new Map(),       // slide -> { total, chunks: Array(total), received }
+  imageBuf: new Map(),       // slide -> { total, chunks: Array(total), received }
   renderedSlide: -1,
+  renderedImageSlide: -1,
+  currentImageUrl: null,
   currentSlide: 0,
   totalSlides: 0,
   hasSlides: false,
@@ -177,6 +184,16 @@ async function connect() {
     await state.notesChar.startNotifications();
     await state.slideChar.startNotifications();
 
+    // Slide-image characteristic is optional — older helpers don't expose it.
+    try {
+      state.imageChar = await service.getCharacteristic(CHAR_IMAGE);
+      state.imageChar.addEventListener('characteristicvaluechanged', onImage);
+      await state.imageChar.startNotifications();
+    } catch (err) {
+      state.imageChar = null;
+      console.info('slide-image characteristic not available on this helper');
+    }
+
     setStatus('Connected', 'connected');
     setMode('Ready', true);
     els.connect.disabled = false;
@@ -215,8 +232,12 @@ function onDisconnect() {
   state.commandChar = null;
   state.notesChar = null;
   state.slideChar = null;
+  state.imageChar = null;
   state.notesBuf.clear();
+  state.imageBuf.clear();
   state.renderedSlide = -1;
+  state.renderedImageSlide = -1;
+  clearSlideThumb();
   state.currentSlide = 0;
   state.totalSlides = 0;
   setCounter(0, 0);
@@ -319,6 +340,76 @@ function renderNotes(slide, text) {
     els.notes.scrollTop = 0;
     els.notes.classList.remove('swap');
   }, 120);
+}
+
+// ---- Slide thumbnail (image characteristic) ----------------------------
+
+function onImage(ev) {
+  const v = ev.target.value;
+  if (!v || v.byteLength < 3) return;
+  const slide       = v.getUint8(0);
+  const chunkIdx    = v.getUint8(1);
+  const totalChunks = v.getUint8(2);
+  const body = new Uint8Array(v.buffer, v.byteOffset + 3, v.byteLength - 3);
+
+  if (totalChunks === 0) { clearSlideThumb(); return; }
+
+  let entry = state.imageBuf.get(slide);
+  if (!entry || entry.total !== totalChunks) {
+    entry = { total: totalChunks, chunks: new Array(totalChunks), received: 0 };
+    state.imageBuf.set(slide, entry);
+  }
+
+  if (!entry.chunks[chunkIdx]) {
+    entry.chunks[chunkIdx] = body.slice();
+    entry.received += 1;
+  } else {
+    entry.chunks[chunkIdx] = body.slice();
+  }
+
+  if (entry.received >= entry.total) {
+    const totalBytes = entry.chunks.reduce((n, c) => n + (c ? c.length : 0), 0);
+    const merged = new Uint8Array(totalBytes);
+    let off = 0;
+    for (const c of entry.chunks) {
+      if (c) { merged.set(c, off); off += c.length; }
+    }
+    renderSlideThumb(slide, merged);
+    state.imageBuf.delete(slide);
+
+    // Drop any stale partial entries for other slides.
+    for (const k of state.imageBuf.keys()) {
+      if (k !== slide) state.imageBuf.delete(k);
+    }
+  }
+}
+
+function renderSlideThumb(slide, bytes) {
+  if (!els.slideThumb || !els.slideThumbImg) return;
+  const blob = new Blob([bytes], { type: 'image/jpeg' });
+  const url = URL.createObjectURL(blob);
+  const prevUrl = state.currentImageUrl;
+  state.currentImageUrl = url;
+  state.renderedImageSlide = slide;
+
+  els.slideThumb.classList.add('swap');
+  setTimeout(() => {
+    els.slideThumbImg.src = url;
+    els.slideThumb.classList.add('has-image');
+    els.slideThumb.classList.remove('swap');
+    if (prevUrl) URL.revokeObjectURL(prevUrl);
+  }, 120);
+}
+
+function clearSlideThumb() {
+  if (!els.slideThumb || !els.slideThumbImg) return;
+  els.slideThumb.classList.remove('has-image');
+  els.slideThumbImg.removeAttribute('src');
+  if (state.currentImageUrl) {
+    URL.revokeObjectURL(state.currentImageUrl);
+    state.currentImageUrl = null;
+  }
+  state.renderedImageSlide = -1;
 }
 
 // ---- Wire up UI --------------------------------------------------------

@@ -278,6 +278,32 @@ main {
   color: var(--fg-3);
   font-size: 13px;
 }
+
+.slide-thumb {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  width: 36%;
+  max-width: 160px;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--stroke);
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 220ms var(--ease);
+}
+.slide-thumb.has-image { opacity: 1; }
+.slide-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: opacity 180ms var(--ease);
+}
+.slide-thumb.swap img { opacity: 0; }
+
 .mode-tag {
   display: inline-flex;
   align-items: center;
