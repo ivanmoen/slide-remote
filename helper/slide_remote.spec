@@ -39,6 +39,16 @@ for pkg in ("pystray", "PIL"):
         pass
 hiddenimports += ["pystray._win32"]
 
+# websockets: a few asyncio submodules are imported via string lookups.
+for pkg in ("websockets",):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        hiddenimports += h
+    except Exception:
+        pass
+
 
 a = Analysis(
     ["main.py"],
