@@ -80,6 +80,18 @@ async function handleHelperMessage(msg) {
     const tabId = await pickSlidesTab();
     if (!tabId) return;
     chrome.tabs.sendMessage(tabId, { type: 'cmd', command: msg.command });
+    // Start a slideshow → also fullscreen the browser window. Extensions
+    // have this privilege (chrome.windows API), unlike the page's
+    // Fullscreen API which requires a real user gesture. We delay
+    // slightly so Slides has time to enter slideshow mode first.
+    if (msg.command === 'start') {
+      setTimeout(() => fullscreenSlidesWindow(tabId), 400);
+    }
+    // Leave fullscreen on End so the user can interact with their other
+    // windows again.
+    if (msg.command === 'end') {
+      setTimeout(() => unfullscreenSlidesWindow(tabId), 200);
+    }
     return;
   }
   if (type === 'request_image') {
@@ -100,6 +112,27 @@ async function handleHelperMessage(msg) {
       console.warn('[slide-remote] captureVisibleTab failed:', e);
     }
     return;
+  }
+}
+
+async function fullscreenSlidesWindow(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab) return;
+    await chrome.windows.update(tab.windowId, { state: 'fullscreen' });
+    console.log('[slide-remote] window fullscreened');
+  } catch (e) {
+    console.warn('[slide-remote] fullscreen failed:', e);
+  }
+}
+
+async function unfullscreenSlidesWindow(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab) return;
+    await chrome.windows.update(tab.windowId, { state: 'normal' });
+  } catch (e) {
+    console.warn('[slide-remote] un-fullscreen failed:', e);
   }
 }
 

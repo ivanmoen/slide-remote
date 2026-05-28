@@ -112,20 +112,22 @@ PowerPoint's so the BLE protocol is the same:
 | `start` | Ctrl+F5 (Slides' "Present from beginning"); falls back to clicking the toolbar's Present button if the key doesn't engage slideshow mode within ~250 ms |
 | `end` | Escape |
 
-### Caveat: Start doesn't always fullscreen
+### How Start handles fullscreen
 
-Browsers only honour the **Fullscreen API** in response to a real user
-gesture (a click or keypress that actually originates from the user's
-keyboard / mouse). Synthetic events from a content script — including
-the ones the extension dispatches when you tap **Start** on the phone —
-don't qualify. So Google Slides may go into **slideshow mode** (Next /
-Prev / End all work) but stay in a normal browser tab rather than a
-true fullscreen window.
+The page's **Fullscreen API** only triggers from a real user gesture,
+so synthetic events from a content script can't drive it. We get
+around this by using the extension's privileged `chrome.windows`
+API: after sending Ctrl+F5 to put Slides into slideshow mode, the
+background script calls
+`chrome.windows.update(windowId, {state: "fullscreen"})` on the
+Slides tab's browser window. That works from extension code without
+needing a user gesture.
 
-If you need true fullscreen, **press F11 on the laptop** after Start
-lands you in slideshow mode, or start the slideshow yourself by
-clicking the Present button before connecting from the phone. From
-then on the phone drives navigation as usual.
+**End** flips the window back to its normal state.
+
+The chrome.windows fullscreen is technically *browser-window
+fullscreen* (the same thing F11 does), not *page-element fullscreen*
+— functionally identical for presenting.
 
 ### Thumbnails
 
