@@ -82,15 +82,20 @@ async function handleHelperMessage(msg) {
     chrome.tabs.sendMessage(tabId, { type: 'cmd', command: msg.command });
     // Start a slideshow → also fullscreen the browser window. Extensions
     // have this privilege (chrome.windows API), unlike the page's
-    // Fullscreen API which requires a real user gesture. We delay
-    // slightly so Slides has time to enter slideshow mode first.
+    // Fullscreen API which requires a real user gesture. After the
+    // keystroke, Slides typically opens the slideshow in a *new* window
+    // — we re-query so we fullscreen that one, not the editor.
     if (msg.command === 'start') {
-      setTimeout(() => fullscreenSlidesWindow(tabId), 400);
+      setTimeout(async () => {
+        const presentTabId = await pickSlidesTab();
+        if (presentTabId) await fullscreenSlidesWindow(presentTabId);
+      }, 700);
     }
-    // Leave fullscreen on End so the user can interact with their other
-    // windows again.
     if (msg.command === 'end') {
-      setTimeout(() => unfullscreenSlidesWindow(tabId), 200);
+      setTimeout(async () => {
+        const presentTabId = await pickSlidesTab();
+        if (presentTabId) await unfullscreenSlidesWindow(presentTabId);
+      }, 200);
     }
     return;
   }
@@ -137,19 +142,25 @@ async function unfullscreenSlidesWindow(tabId) {
 }
 
 async function pickSlidesTab() {
-  // If we know the active Slides tab and it's still alive, use it.
-  if (activeTabId !== null) {
-    try {
-      const tab = await chrome.tabs.get(activeTabId);
-      if (tab && /docs\.google\.com\/presentation/.test(tab.url || '')) {
-        return activeTabId;
-      }
-    } catch (_) { /* fall through */ }
+  // Always re-query so we can prefer a /present tab when one exists.
+  // Google opens the slideshow in a separate window from the editor,
+  // and commands / fullscreen need to target that window.
+  let tabs;
+  try {
+    tabs = await chrome.tabs.query({ url: '*://docs.google.com/presentation/*' });
+  } catch (_) {
+    tabs = [];
   }
-  // Otherwise find any open Slides tab.
-  const tabs = await chrome.tabs.query({ url: '*://docs.google.com/presentation/*' });
-  if (tabs.length === 0) return null;
-  activeTabId = tabs[0].id;
+  if (!tabs || tabs.length === 0) {
+    activeTabId = null;
+    return null;
+  }
+  // Prefer a slideshow (/present) tab over the editor (/edit). The
+  // slideshow tab is the one that actually responds to Right/Left and
+  // the one we want to fullscreen.
+  const present = tabs.find(t => /\/present(\b|\?)/.test(t.url || ''));
+  const chosen = present || tabs[0];
+  activeTabId = chosen.id;
   return activeTabId;
 }
 

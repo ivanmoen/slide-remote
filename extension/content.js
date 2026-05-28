@@ -48,13 +48,21 @@
       if (!m) m = txt.match(/(\d+)\s*of\s*(\d+)/i);
       if (m) return { current: +m[1], total: +m[2] };
     }
-    // Fall back to URL fragment for slideshow position (when present).
-    const m = location.hash.match(/[?&]slide=id\.([^&]+)/);
-    if (m) {
-      // Index unknown without DOM; report current=1, total=0 so phone
-      // shows something instead of "—/—".
-      return { current: 1, total: 0 };
-    }
+    // Wide net: scan visible text for "N / M" or "N of M" anywhere.
+    // Avoids hand-curating selectors when Google reshuffles classes.
+    try {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const t = (node.nodeValue || '').trim();
+        if (!t || t.length > 32) continue;  // skip large blobs
+        let m = t.match(/^(\d+)\s*[\/]\s*(\d+)$/);
+        if (!m) m = t.match(/^(\d+)\s*of\s*(\d+)$/i);
+        if (m && +m[2] >= +m[1] && +m[2] <= 999) {
+          return { current: +m[1], total: +m[2] };
+        }
+      }
+    } catch (_) { /* ignore */ }
     return { current: 0, total: 0 };
   }
 
@@ -79,8 +87,17 @@
 
   function collectState() {
     const present = isPresenting();
-    const { current, total } = readCurrentTotal();
+    let { current, total } = readCurrentTotal();
     const notes = present ? readNotes() : '';
+    // When we *know* we're in slideshow mode (URL says so) but the DOM
+    // scrape didn't yield a counter, fall back to current=1/total=1 so
+    // the helper recognises Slides as the active source and starts
+    // routing commands here. Counter accuracy can be tuned later by
+    // adding selectors to readCurrentTotal().
+    if (present && total === 0) {
+      current = 1;
+      total = 1;
+    }
     return {
       in_show: present,
       current,
