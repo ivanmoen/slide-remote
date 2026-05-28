@@ -26,17 +26,25 @@ This project keeps it local and unceremonious:
 ## Architecture
 
 ```
-┌─────────────────┐        BLE GATT          ┌──────────────────────┐
-│  Phone web app  │ ◄──────────────────────► │   PC helper (tray)   │
-│  (Chrome PWA)   │   commands + notes       │   asyncio + bless    │
-│                 │   slide info + image     │                      │
-└─────────────────┘                          │   COM / PostMessage  │
-                                             │           ▼          │
-                                             │   PowerPoint app     │
-                                             └──────────────────────┘
+                              BLE GATT
+        ┌─────────────────┐ ◄─────────────► ┌────────────────────┐
+        │  Phone web app  │   commands +    │  PC helper (tray)  │
+        │  (Chrome PWA)   │  notes / info / │   asyncio + bless  │
+        │                 │      image      │                    │
+        └─────────────────┘                 └─────┬──────────────┘
+                                                  │
+                          ┌───────────────────────┴───────────────────────┐
+                          ▼                                               ▼
+              ┌──────────────────────┐                       ┌──────────────────────┐
+              │   PowerPoint app     │                       │  Chrome extension    │
+              │  (COM + PostMessage  │                       │  (Google Slides DOM, │
+              │   + GDI capture)     │                       │   localhost WS)      │
+              └──────────────────────┘                       └──────────────────────┘
 ```
 
-Two processes, one connection. Everything else is plumbing.
+The helper picks which source is active per poll — Google Slides wins
+when the extension reports an in-progress slideshow, PowerPoint
+otherwise. Everything else is plumbing.
 
 ### PC helper (`helper/`)
 

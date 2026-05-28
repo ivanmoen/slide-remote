@@ -11,6 +11,12 @@ Each item names what to do, why it matters, and a rough complexity hint
 
 ## ✅ Shipped
 
+- **Google Slides support** via a Chrome extension + localhost WebSocket
+  bridge. The helper auto-switches source: when the extension reports
+  being in a Google Slides slideshow, commands route to it (via
+  synthesized key events) and state comes from the slide DOM. When
+  Slides isn't active, PowerPoint stays the default. Thumbnails come
+  from `chrome.tabs.captureVisibleTab`.
 - **Tray-icon helper** (was P1 M). `pystray`-based system-tray UI with
   Status / Reconnect BLE / Open log / Start at login / Quit. Icon turns
   violet for ~30 s after each command. Logs rotate at

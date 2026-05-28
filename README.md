@@ -1,28 +1,31 @@
 # Slide Remote
 
-Turn your phone into a PowerPoint remote with **live speaker notes**, a **slide thumbnail**, and a **timer** — over Bluetooth LE. No shared Wi-Fi, no accounts, no app to install on the phone.
+Turn your phone into a remote for **PowerPoint *and* Google Slides** with live speaker notes, a slide thumbnail, and a timer — over Bluetooth LE. No shared Wi-Fi, no accounts, no app to install on the phone.
 
 > 📱 Phone web app: **<https://ivanmoen.github.io/slide-remote/>**
 > 💻 PC helper: **[helper/dist/SlideRemoteHelper.exe](helper/dist/SlideRemoteHelper.exe)** (Windows, ~22 MB, no Python required)
+> 🧩 Chrome extension (optional, for Google Slides): **[extension/](extension/)**
 
 ```
-┌─────────────────┐        BLE GATT          ┌──────────────────┐
-│  Phone web app  │ ◄──────────────────────► │   PC helper      │
-│  (Chrome PWA)   │   commands + notes       │   (tray icon)    │
-│                 │   slide info + image     │                  │
-└─────────────────┘                          │  COM / PostMessage │
-                                             │         ▼          │
-                                             │   PowerPoint app   │
-                                             └────────────────────┘
+┌─────────────────┐    BLE     ┌──────────────┐
+│  Phone web app  │ ◄────────► │   Helper     │ ──► PowerPoint (COM + HWND)
+│  (Chrome PWA)   │            │  (tray icon) │
+└─────────────────┘            └──────┬───────┘
+                                      │ localhost WS (optional)
+                                      ▼
+                             ┌──────────────────┐
+                             │ Chrome extension │ ──► Google Slides (DOM)
+                             └──────────────────┘
 ```
 
 ## What you get
 
-- **Next / Prev / Black / White / Start / End** — six PowerPoint commands as one-tap buttons.
+- **Next / Prev / Black / White / Start / End** — six commands as one-tap buttons, working in **PowerPoint** *and* **Google Slides**.
 - **Live speaker notes** for the current slide, with chunk reassembly so longer notes still arrive.
 - **Slide thumbnail** of what's on the projector right now, updated when you settle on a slide.
 - **Slide counter** that respects hidden slides (`3/9` instead of `4/12` when slide 3 is hidden).
 - **Timer** you control with Start / End — useful for time-boxing talks.
+- **Auto-switching source** — the helper picks PowerPoint or Google Slides automatically based on what's currently in slideshow mode.
 - **Web Bluetooth, no Wi-Fi** — works in basement conference rooms with no connectivity.
 - **PWA install** — Add to Home Screen and the app launches like a native app, fully offline-capable.
 - **Tray-icon helper on the PC** — no console window, optional auto-start at login.
@@ -42,6 +45,17 @@ Easiest path — download the prebuilt binary:
 
 Building from source instead? See **[helper/README.md](helper/README.md)**.
 
+### 1b. (Optional) Google Slides bridge
+
+If you want to drive Google Slides as well as PowerPoint:
+
+1. Open **`chrome://extensions`** in Chrome on the presenter PC.
+2. Toggle **Developer mode** on (top-right).
+3. Click **Load unpacked** and select the **[`extension/`](extension/)** folder from this repo.
+4. The extension icon appears in the toolbar — click it and you should see "Helper: connected".
+
+That's it. Open a Google Slides deck and start the slideshow; the helper auto-switches source. Full details and selector-tuning notes in **[extension/README.md](extension/README.md)**.
+
 ### 2. Phone (Android Chrome)
 
 1. Open **<https://ivanmoen.github.io/slide-remote/>** in Chrome on Android.
@@ -54,9 +68,10 @@ Building from source instead? See **[helper/README.md](helper/README.md)**.
 ## Layout
 
 ```
-helper/         Python BLE peripheral + PowerPoint COM bridge (Windows)
+helper/         Python BLE peripheral + PowerPoint COM bridge + WS server
   dist/         Prebuilt SlideRemoteHelper.exe (ships with the repo)
 web/            Static HTML/JS phone client (deployed to GitHub Pages)
+extension/      Optional Chrome extension for Google Slides support
 docs/           Architecture, feature list, prioritized backlog
 ```
 
