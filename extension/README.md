@@ -109,8 +109,23 @@ PowerPoint's so the BLE protocol is the same:
 | `prev` | Left Arrow |
 | `black` | B |
 | `white` | W |
-| `start` | Ctrl+Shift+S (Slides' "Start slideshow") |
+| `start` | Ctrl+F5 (Slides' "Present from beginning"); falls back to clicking the toolbar's Present button if the key doesn't engage slideshow mode within ~250 ms |
 | `end` | Escape |
+
+### Caveat: Start doesn't always fullscreen
+
+Browsers only honour the **Fullscreen API** in response to a real user
+gesture (a click or keypress that actually originates from the user's
+keyboard / mouse). Synthetic events from a content script — including
+the ones the extension dispatches when you tap **Start** on the phone —
+don't qualify. So Google Slides may go into **slideshow mode** (Next /
+Prev / End all work) but stay in a normal browser tab rather than a
+true fullscreen window.
+
+If you need true fullscreen, **press F11 on the laptop** after Start
+lands you in slideshow mode, or start the slideshow yourself by
+clicking the Present button before connecting from the phone. From
+then on the phone drives navigation as usual.
 
 ### Thumbnails
 

@@ -192,10 +192,21 @@ class _Backend:
             log.exception("BLE start failed")
             self._update_state("stopped")
             return
+        # Best-effort start the Google Slides bridge. Failure here is
+        # non-fatal — Slides support is optional, PowerPoint always works
+        # without it. The bridge itself logs success/failure.
+        try:
+            await self._app.slides.start()
+        except Exception:
+            log.exception("Slides bridge start failed (non-fatal)")
         self._update_state("advertising")
         try:
             await self._app._poll_loop()  # type: ignore[attr-defined]
         finally:
+            try:
+                await self._app.slides.stop()
+            except Exception:
+                log.debug("Slides stop error during shutdown", exc_info=True)
             try:
                 await self._app.ble.stop()
             except Exception:

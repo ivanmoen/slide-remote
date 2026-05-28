@@ -116,15 +116,21 @@
 
   // ─── Command injection ──────────────────────────────────────────────
 
-  // Map our command names onto the keyboard shortcuts Google Slides uses
-  // in slideshow mode. These match PowerPoint's slideshow shortcuts so
-  // the protocol is uniform across both targets.
+  // Map our command names onto the keyboard shortcuts Google Slides uses.
+  // Notes:
+  //   - "start" uses Ctrl+F5 (Slides' actual "Present from beginning"
+  //     binding). Browser-level fullscreen requires a real user gesture
+  //     though, so even with the right shortcut the browser may decline
+  //     to fullscreen — slideshow mode will still engage, the user just
+  //     has to confirm or hit F11 themselves.
+  //   - other commands match PowerPoint shortcuts so the BLE protocol
+  //     is uniform.
   const KEY_FOR = {
     next:  { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
     prev:  { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
     black: { key: 'b',          code: 'KeyB',       keyCode: 66 },
     white: { key: 'w',          code: 'KeyW',       keyCode: 87 },
-    start: { key: 's',          code: 'KeyS',       keyCode: 83, ctrlKey: true, shiftKey: true }, // Ctrl+Shift+S starts slideshow
+    start: { key: 'F5',         code: 'F5',         keyCode: 116, ctrlKey: true },
     end:   { key: 'Escape',     code: 'Escape',     keyCode: 27 },
   };
 
@@ -144,11 +150,25 @@
     target.dispatchEvent(ev);
   }
 
-  function injectCommand(name) {
-    const d = KEY_FOR[name];
-    if (!d) return false;
-    // Try active element first, then the slideshow iframe if we're in
-    // presenter mode, then the document body.
+  // Try several known aria-label patterns for the Slides "Present" button.
+  // If we find one, we click it as a fallback when the keyboard shortcut
+  // doesn't take.
+  function findPresentButton() {
+    const selectors = [
+      '[aria-label="Slideshow"]',
+      '[aria-label*="lideshow" i]',
+      '[aria-label*="resentation" i]',
+      '[aria-label*="resent" i][role="button"]',
+      '#scb-button',
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  function dispatchToCommonTargets(d) {
     const targets = [
       document.activeElement,
       document.querySelector('iframe.punch-present-iframe'),
@@ -164,6 +184,29 @@
       } catch (_) { /* try next */ }
     }
     return false;
+  }
+
+  function injectCommand(name) {
+    const d = KEY_FOR[name];
+    if (!d) return false;
+
+    // For Start, try the keyboard shortcut first, then a button click as
+    // a fallback — Google sometimes refactors keyboard handling without
+    // refactoring the toolbar button.
+    if (name === 'start') {
+      const sentKey = dispatchToCommonTargets(d);
+      // Give the keyboard handler a moment; if we don't see a URL change
+      // soon, click the Present button instead.
+      setTimeout(() => {
+        if (!isPresenting()) {
+          const btn = findPresentButton();
+          if (btn) btn.click();
+        }
+      }, 250);
+      return sentKey;
+    }
+
+    return dispatchToCommonTargets(d);
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
